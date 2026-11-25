@@ -73,6 +73,9 @@ public class AdminController {
             HttpServletResponse response) {
 
         Authentication authentication = adminService.login(dto);
+        if (request.getSession(false) != null) {
+            request.changeSessionId();
+        }
 
         SecurityContext context =
                 SecurityContextHolder.createEmptyContext();

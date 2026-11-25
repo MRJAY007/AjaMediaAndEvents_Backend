@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.FutureOrPresent;
+import jakarta.validation.constraints.Pattern;
 
 public class EnquiryRequestDTO {
 
@@ -16,9 +17,11 @@ public class EnquiryRequestDTO {
     private String name;
 
     @NotBlank(message = "Phone number is required")
-    @Size(min = 10, max = 15, message = "Invalid phone number length")
+    @Pattern(
+        regexp = "^\\+?[0-9]{10,15}$",
+        message = "Enter a valid phone number"
+    )
     private String phone;
-
     @NotBlank(message = "Occasion is required")
     @Size(max = 30, message = "Occasion cannot exceed 30 characters")
     private String occasion;

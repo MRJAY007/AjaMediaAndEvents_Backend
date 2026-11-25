@@ -40,3 +40,5 @@ target/
 application-local.properties
 .idea/
 .vscode/
+application-local.properties
+.env

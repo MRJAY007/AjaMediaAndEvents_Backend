@@ -10,6 +10,7 @@ import com.aja.mediaevents.dto.AdminEnquiryResponseDTO;
 import com.aja.mediaevents.dto.EnquiryRequestDTO;
 import com.aja.mediaevents.dto.EnquiryResponseDTO;
 import com.aja.mediaevents.Entity.EnquiryFormEntity;
+import com.aja.mediaevents.Exceptions.ResourceNotFoundException;
 import com.aja.mediaevents.Repository.EnquiryRepo;
 
 @Service
@@ -86,8 +87,8 @@ public class EnquiryService {
     public AdminEnquiryResponseDTO getAdminEnquiryById(Long id) {
 
         EnquiryFormEntity enquiry = enquiryRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException(
-                        "Enquiry not found with ID: " + id));
+        		.orElseThrow(() -> new ResourceNotFoundException(
+        			    "Enquiry not found with ID: " + id));
 
         return mapToAdminResponse(enquiry);
     }
