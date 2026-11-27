@@ -12,10 +12,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -26,12 +26,16 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class EnquiryRateLimitFilter extends OncePerRequestFilter {
 
     private static final int ENQUIRY_LIMIT = 5;
-    private static final long ENQUIRY_WINDOW = 60_000;
+    private static final long ENQUIRY_WINDOW = 60_000L;
+
+    private static final int TRAFFIC_LIMIT = 60;
+    private static final long TRAFFIC_WINDOW = 60_000L;
 
     private static final int LOGIN_EMAIL_LIMIT = 5;
     private static final int LOGIN_IP_LIMIT = 20;
     private static final long LOGIN_WINDOW = 15 * 60_000L;
 
+    private static final int MAX_LOGIN_BODY_SIZE = 4096;
     private static final int MAX_ENTRIES = 50_000;
 
     private final ConcurrentHashMap<String, RateLimitEntry> requests =
@@ -50,12 +54,12 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
         String method = request.getMethod();
-
+        String contextPath = request.getContextPath();
         String clientIp = request.getRemoteAddr();
 
-        // Public enquiry rate limiting
+        // Public enquiry: 5 requests per IP per minute.
         if (HttpMethod.POST.matches(method)
-                && path.equals(request.getContextPath() + "/api/enquiries")) {
+                && path.equals(contextPath + "/api/enquiries")) {
 
             if (isLimited(
                     "enquiry:" + clientIp,
@@ -63,8 +67,7 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
                     ENQUIRY_WINDOW)) {
 
                 writeRateLimitResponse(
-                        response,
-                        60,
+                        response, 60,
                         "Too many enquiries. Please try again later."
                 );
                 return;
@@ -74,50 +77,76 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Admin login rate limiting
+        // Public traffic tracking: 60 requests per IP per minute.
         if (HttpMethod.POST.matches(method)
-                && path.equals(request.getContextPath() + "/api/admin/login")) {
+                && path.equals(contextPath + "/api/traffic/track")) {
 
-            byte[] body = request.getInputStream().readAllBytes();
+            if (isLimited(
+                    "traffic:" + clientIp,
+                    TRAFFIC_LIMIT,
+                    TRAFFIC_WINDOW)) {
 
-            CachedBodyRequest wrappedRequest =
-                    new CachedBodyRequest(request, body);
+                writeRateLimitResponse(
+                        response, 60,
+                        "Too many tracking requests. Please try again later."
+                );
+                return;
+            }
 
-            String email = extractEmail(body);
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-            // Limit requests per IP
+        // Admin login: check the IP limit before reading the body.
+        if (HttpMethod.POST.matches(method)
+                && path.equals(contextPath + "/api/admin/login")) {
+
             if (isLimited(
                     "login-ip:" + clientIp,
                     LOGIN_IP_LIMIT,
                     LOGIN_WINDOW)) {
 
                 writeRateLimitResponse(
-                        response,
-                        900,
+                        response, 900,
                         "Too many login attempts. Please try again later."
                 );
                 return;
             }
 
-            // Limit attempts per IP and email
+            // Reject an oversized body using Content-Length when available.
+            if (request.getContentLengthLong() > MAX_LOGIN_BODY_SIZE) {
+                writePayloadTooLarge(response);
+                return;
+            }
+
+            // Also cap chunked or unknown-length requests.
+            byte[] body = request.getInputStream()
+                    .readNBytes(MAX_LOGIN_BODY_SIZE + 1);
+
+            if (body.length > MAX_LOGIN_BODY_SIZE) {
+                writePayloadTooLarge(response);
+                return;
+            }
+
+            String email = extractEmail(body);
+
             if (email != null && !email.isBlank()) {
 
                 String key = "login-email:"
-                        + clientIp + ":" + email.trim().toLowerCase();
+                        + clientIp + ":"
+                        + email.trim().toLowerCase();
 
-                if (isLimited(
-                        key,
-                        LOGIN_EMAIL_LIMIT,
-                        LOGIN_WINDOW)) {
-
+                if (isLimited(key, LOGIN_EMAIL_LIMIT, LOGIN_WINDOW)) {
                     writeRateLimitResponse(
-                            response,
-                            900,
+                            response, 900,
                             "Too many login attempts. Please try again later."
                     );
                     return;
                 }
             }
+
+            CachedBodyRequest wrappedRequest =
+                    new CachedBodyRequest(request, body);
 
             filterChain.doFilter(wrappedRequest, response);
             return;
@@ -130,7 +159,6 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
 
         try {
             Map<?, ?> data = objectMapper.readValue(body, Map.class);
-
             Object email = data.get("email");
 
             return email == null ? null : email.toString();
@@ -145,29 +173,30 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
             int maximumRequests,
             long window) {
 
-    	long now = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
 
-    	RateLimitEntry entry = requests.get(key);
+        RateLimitEntry entry = requests.get(key);
 
-    	if (entry == null && requests.size() >= MAX_ENTRIES) {
+        if (entry == null && requests.size() >= MAX_ENTRIES) {
 
-    	    requests.entrySet().removeIf(item -> {
-    	        RateLimitEntry oldEntry = item.getValue();
+            requests.entrySet().removeIf(item -> {
+                RateLimitEntry oldEntry = item.getValue();
 
-    	        synchronized (oldEntry) {
-    	            return now - oldEntry.windowStart > LOGIN_WINDOW;
-    	        }
-    	    });
+                synchronized (oldEntry) {
+                    return now - oldEntry.windowStart > LOGIN_WINDOW;
+                }
+            });
 
-    	    if (requests.size() >= MAX_ENTRIES) {
-    	        return true;
-    	    }
-    	}
+            // Fail closed for a new key if the map is still full.
+            if (requests.size() >= MAX_ENTRIES) {
+                return true;
+            }
+        }
 
-    	entry = requests.computeIfAbsent(
-    	        key,
-    	        ignored -> new RateLimitEntry(now)
-    	);
+        entry = requests.computeIfAbsent(
+                key,
+                ignored -> new RateLimitEntry(now)
+        );
 
         synchronized (entry) {
 
@@ -184,7 +213,6 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
         }
 
         cleanupExpiredEntries(now);
-
         return false;
     }
 
@@ -195,15 +223,12 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
         }
 
         requests.entrySet().removeIf(item -> {
-
             RateLimitEntry entry = item.getValue();
 
             synchronized (entry) {
                 return now - entry.windowStart > LOGIN_WINDOW;
             }
         });
-
-        
     }
 
     private void writeRateLimitResponse(
@@ -211,7 +236,7 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
             int retryAfter,
             String message) throws IOException {
 
-        response.setStatus(429);
+        response.setStatus(HttpServletResponse.SC_REQUEST_URI_TOO_LONG);
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
         response.setHeader("Retry-After", String.valueOf(retryAfter));
@@ -219,6 +244,20 @@ public class EnquiryRateLimitFilter extends OncePerRequestFilter {
         response.getWriter().write(
                 objectMapper.writeValueAsString(
                         Map.of("message", message)
+                )
+        );
+    }
+
+    private void writePayloadTooLarge(
+            HttpServletResponse response) throws IOException {
+
+        response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+        response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+
+        response.getWriter().write(
+                objectMapper.writeValueAsString(
+                        Map.of("message", "Login request body is too large")
                 )
         );
     }

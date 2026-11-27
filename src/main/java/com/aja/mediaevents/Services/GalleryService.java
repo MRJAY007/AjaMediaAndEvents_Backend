@@ -106,7 +106,8 @@ public class GalleryService {
 
     public List<GalleryResponseDTO> getAllImages() {
 
-        List<GalleryEntity> images = galleryRepo.findAll();
+    	List<GalleryEntity> images =
+    	        galleryRepo.findAllByOrderByCreatedAtDesc();
         List<GalleryResponseDTO> response = new ArrayList<>();
 
         for (GalleryEntity image : images) {

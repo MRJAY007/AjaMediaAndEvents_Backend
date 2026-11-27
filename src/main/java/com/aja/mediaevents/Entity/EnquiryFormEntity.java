@@ -1,15 +1,19 @@
+
 package com.aja.mediaevents.Entity;
 
-
-import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+
+import jakarta.persistence.*;
 
 @Entity
 @Table(name = "enquiries")
-public class EnquiryFormEntity 
-{
-	@Id
+public class EnquiryFormEntity {
+
+    private static final ZoneId INDIA_ZONE = ZoneId.of("Asia/Kolkata");
+
+    @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
@@ -39,10 +43,8 @@ public class EnquiryFormEntity
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(INDIA_ZONE);
     }
-
-    // Getters and Setters
 
     public Long getId() {
         return id;
@@ -111,5 +113,4 @@ public class EnquiryFormEntity
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
-
 }

@@ -14,6 +14,8 @@ import com.aja.mediaevents.dto.GalleryRequestDTO;
 import com.aja.mediaevents.dto.GalleryResponseDTO;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 @RestController
 @RequestMapping("/api")
@@ -52,8 +54,16 @@ public class GalleryController {
     @PutMapping("/admin/gallery/{id}")
     public ResponseEntity<GalleryResponseDTO> updateImage(
             @PathVariable Long id,
-            @RequestParam String title,
-            @RequestParam String category) {
+
+            @RequestParam
+            @NotBlank(message = "Title cannot be empty")
+            @Size(max = 255, message = "Title cannot exceed 255 characters")
+            String title,
+
+            @RequestParam
+            @NotBlank(message = "Category cannot be empty")
+            @Size(max = 255, message = "Category cannot exceed 255 characters")
+            String category) {
 
         GalleryResponseDTO updatedImage =
                 galleryService.updateImage(id, title, category);
