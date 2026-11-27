@@ -3,12 +3,12 @@ package com.aja.mediaevents.Security;
 
 import java.util.List;
 
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.csrf.CsrfFilter;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -17,12 +17,13 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 public class SecurityConfig {
@@ -59,45 +60,78 @@ public class SecurityConfig {
             throws Exception {
 
         http
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .cors(cors ->
+                cors.configurationSource(corsConfigurationSource())
+            )
+
             .csrf(csrf -> csrf
-            	    .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-            	    .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-            	    .ignoringRequestMatchers("/api/enquiries")
-            	)
+                .csrfTokenRepository(
+                    CookieCsrfTokenRepository.withHttpOnlyFalse()
+                )
+                .csrfTokenRequestHandler(
+                    new CsrfTokenRequestAttributeHandler()
+                )
+                .ignoringRequestMatchers(
+                    "/api/enquiries",
+                    "/api/traffic/track"
+                )
+            )
+
             .authenticationProvider(authenticationProvider)
 
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint(
+                    new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)
+                )
+            )
 
-.authorizeHttpRequests(auth -> auth
-    .requestMatchers(HttpMethod.POST, "/api/enquiries").permitAll()
-    .requestMatchers(HttpMethod.GET, "/api/admin/csrf").permitAll()
-    .requestMatchers(HttpMethod.POST, "/api/admin/login").permitAll()
+            .authorizeHttpRequests(auth -> auth
 
-    // Public gallery viewing
-    .requestMatchers(HttpMethod.GET, "/api/gallery").permitAll()
+                .requestMatchers(
+                    HttpMethod.POST,
+                    "/api/enquiries"
+                ).permitAll()
 
-    // Admin-only APIs
-    .requestMatchers("/api/admin/**").hasRole("ADMIN")
-    .requestMatchers(HttpMethod.POST, "/api/traffic/track").permitAll()
+                .requestMatchers(
+                    HttpMethod.POST,
+                    "/api/traffic/track"
+                ).permitAll()
 
-    .anyRequest().denyAll()
-)
+                .requestMatchers(
+                    HttpMethod.GET,
+                    "/api/admin/csrf"
+                ).permitAll()
 
+                .requestMatchers(
+                    HttpMethod.POST,
+                    "/api/admin/login"
+                ).permitAll()
+
+                .requestMatchers(
+                    HttpMethod.GET,
+                    "/api/gallery"
+                ).permitAll()
+
+                .requestMatchers("/api/admin/**")
+                .hasRole("ADMIN")
+
+                .anyRequest().denyAll()
+            )
 
             .sessionManagement(session -> session
-                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                .sessionCreationPolicy(
+                    SessionCreationPolicy.IF_REQUIRED
+                )
             )
 
             .formLogin(form -> form.disable())
 
             .httpBasic(basic -> basic.disable());
-        
-        
+
         http.addFilterBefore(
         	    new EnquiryRateLimitFilter(),
-        	    UsernamePasswordAuthenticationFilter.class
+        	    CsrfFilter.class
         	);
-        
         return http.build();
     }
 
@@ -107,15 +141,18 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         configuration.setAllowedOrigins(
-                List.of("http://localhost:3000")
+            List.of("http://localhost:3000")
         );
 
         configuration.setAllowedMethods(
-                List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+            List.of(
+                "GET", "POST", "PUT",
+                "PATCH", "DELETE", "OPTIONS"
+            )
         );
 
         configuration.setAllowedHeaders(
-                List.of("Content-Type", "X-XSRF-TOKEN")
+            List.of("Content-Type", "X-XSRF-TOKEN")
         );
 
         configuration.setAllowCredentials(true);

@@ -16,7 +16,7 @@ public class EnquiryFormEntity
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(nullable = false, length = 15)
+    @Column(nullable = false, length = 20)
     private String phone;
 
     @Column(nullable = false, length = 100)

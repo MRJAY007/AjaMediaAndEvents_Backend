@@ -2,14 +2,13 @@
 package com.aja.mediaevents.Services;
 
 import java.io.IOException;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.tika.Tika;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -25,9 +24,6 @@ import com.cloudinary.utils.ObjectUtils;
 @Service
 public class GalleryService {
 
-    private final GalleryRepo galleryRepo;
-    private final Cloudinary cloudinary;
-    
     private static final Logger logger =
             LoggerFactory.getLogger(GalleryService.class);
 
@@ -36,38 +32,76 @@ public class GalleryService {
     private static final List<String> ALLOWED_TYPES =
             List.of("image/jpeg", "image/png", "image/webp");
 
-    public GalleryService(GalleryRepo galleryRepo, Cloudinary cloudinary) {
+    private final GalleryRepo galleryRepo;
+    private final Cloudinary cloudinary;
+
+    public GalleryService(
+            GalleryRepo galleryRepo,
+            Cloudinary cloudinary) {
+
         this.galleryRepo = galleryRepo;
         this.cloudinary = cloudinary;
     }
 
-    public GalleryResponseDTO uploadImage(GalleryRequestDTO request) throws IOException {
+    public GalleryResponseDTO uploadImage(
+            GalleryRequestDTO request) throws IOException {
 
         validateImage(request.getImage());
 
-        if (request.getTitle() == null || request.getTitle().trim().isEmpty()) {
+        if (request.getTitle() == null
+                || request.getTitle().trim().isEmpty()) {
             throw new InvalidRequestException("Title cannot be empty");
         }
 
-        if (request.getCategory() == null || request.getCategory().trim().isEmpty()) {
+        if (request.getCategory() == null
+                || request.getCategory().trim().isEmpty()) {
             throw new InvalidRequestException("Category cannot be empty");
         }
 
-        Map uploadResult = cloudinary.uploader().upload(
+        Map<?, ?> uploadResult = cloudinary.uploader().upload(
                 request.getImage().getBytes(),
                 ObjectUtils.asMap("folder", "aja-gallery")
         );
+
+        Object secureUrl = uploadResult.get("secure_url");
+        Object publicId = uploadResult.get("public_id");
+
+        if (secureUrl == null || publicId == null) {
+            throw new IllegalStateException(
+                    "Cloudinary did not return the uploaded image details"
+            );
+        }
 
         GalleryEntity gallery = new GalleryEntity();
 
         gallery.setTitle(request.getTitle().trim());
         gallery.setCategory(request.getCategory().trim());
-        gallery.setImageUrl(uploadResult.get("secure_url").toString());
-        gallery.setPublicId(uploadResult.get("public_id").toString());
+        gallery.setImageUrl(secureUrl.toString());
+        gallery.setPublicId(publicId.toString());
 
-        GalleryEntity savedGallery = galleryRepo.save(gallery);
+        try {
+            GalleryEntity savedGallery = galleryRepo.save(gallery);
+            return mapToResponse(savedGallery);
 
-        return mapToResponse(savedGallery);
+        } catch (RuntimeException ex) {
+
+            // Database save failed after the Cloudinary upload.
+            // Try to remove the uploaded image to avoid an orphan asset.
+            try {
+                cloudinary.uploader().destroy(
+                        publicId.toString(),
+                        ObjectUtils.emptyMap()
+                );
+            } catch (Exception cleanupException) {
+                logger.error(
+                        "Could not clean up Cloudinary image {} after database save failed",
+                        publicId,
+                        cleanupException
+                );
+            }
+
+            throw ex;
+        }
     }
 
     public List<GalleryResponseDTO> getAllImages() {
@@ -95,10 +129,16 @@ public class GalleryService {
         return dto;
     }
 
-    public GalleryResponseDTO updateImage(Long id, String title, String category) {
+    public GalleryResponseDTO updateImage(
+            Long id,
+            String title,
+            String category) {
 
         GalleryEntity image = galleryRepo.findById(id)
-        		.orElseThrow(() -> new ResourceNotFoundException("Gallery image not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Gallery image not found"
+                        ));
 
         if (title == null || title.trim().isEmpty()) {
             throw new InvalidRequestException("Title cannot be empty");
@@ -117,29 +157,45 @@ public class GalleryService {
     }
 
     public void deleteImage(Long id) {
-    	
-    	GalleryEntity image = galleryRepo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Gallery image not found"
-                ));
+
+        GalleryEntity image = galleryRepo.findById(id)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Gallery image not found"
+                        ));
 
         try {
-            @SuppressWarnings("unchecked")
-			Map<String, Object> result = cloudinary.uploader().destroy(
+            Map<?, ?> result = cloudinary.uploader().destroy(
                     image.getPublicId(),
                     ObjectUtils.emptyMap()
             );
 
-            if (!"ok".equals(result.get("result"))) {
-                throw new RuntimeException("Cloudinary image deletion failed");
+            Object deletionStatus = result.get("result");
+
+            // "not found" means the asset is already absent from Cloudinary.
+            // It is safe to remove the stale database record.
+            if (!"ok".equals(deletionStatus)
+                    && !"not found".equals(deletionStatus)) {
+
+                throw new IllegalStateException(
+                        "Cloudinary image deletion was not successful"
+                );
             }
 
             galleryRepo.delete(image);
 
-        } 
-        catch (Exception e) {
-            logger.error("Failed to delete gallery image with ID: {}", id, e);
-            throw new RuntimeException("Failed to delete gallery image", e);
+        } catch (Exception ex) {
+
+            logger.error(
+                    "Failed to delete gallery image with ID: {}",
+                    id,
+                    ex
+            );
+
+            throw new RuntimeException(
+                    "Failed to delete gallery image",
+                    ex
+            );
         }
     }
 
@@ -150,7 +206,9 @@ public class GalleryService {
         }
 
         if (file.getSize() > MAX_FILE_SIZE) {
-            throw new InvalidRequestException("Image size must not exceed 10 MB");
+            throw new InvalidRequestException(
+                    "Image size must not exceed 10 MB"
+            );
         }
 
         Tika tika = new Tika();

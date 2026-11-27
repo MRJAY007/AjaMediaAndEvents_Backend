@@ -8,11 +8,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.bind.annotation.ModelAttribute;
 
 import com.aja.mediaevents.Services.GalleryService;
 import com.aja.mediaevents.dto.GalleryRequestDTO;
 import com.aja.mediaevents.dto.GalleryResponseDTO;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api")
@@ -25,25 +26,29 @@ public class GalleryController {
     }
 
     // Admin: Upload image
-    @PostMapping(value = "/admin/gallery", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(
+        value = "/admin/gallery",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
     public ResponseEntity<GalleryResponseDTO> uploadImage(
-            @ModelAttribute GalleryRequestDTO request) throws IOException {
+            @Valid @ModelAttribute GalleryRequestDTO request)
+            throws IOException {
 
-        GalleryResponseDTO response = galleryService.uploadImage(request);
+        GalleryResponseDTO response =
+                galleryService.uploadImage(request);
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(response);
     }
 
-    // Public: Get all gallery images
+    // Public: Get gallery images
     @GetMapping("/gallery")
     public ResponseEntity<List<GalleryResponseDTO>> getAllImages() {
 
-        List<GalleryResponseDTO> images = galleryService.getAllImages();
-
-        return ResponseEntity.ok(images);
+        return ResponseEntity.ok(galleryService.getAllImages());
     }
 
-    // Admin: Update image title and category
+    // Admin: Update image
     @PutMapping("/admin/gallery/{id}")
     public ResponseEntity<GalleryResponseDTO> updateImage(
             @PathVariable Long id,
@@ -58,12 +63,13 @@ public class GalleryController {
 
     // Admin: Delete image
     @DeleteMapping("/admin/gallery/{id}")
-    public ResponseEntity<String> deleteImage(@PathVariable Long id) {
+    public ResponseEntity<String> deleteImage(
+            @PathVariable Long id) {
 
         galleryService.deleteImage(id);
 
-        return ResponseEntity.ok("Gallery image deleted successfully");
+        return ResponseEntity.ok(
+                "Gallery image deleted successfully"
+        );
     }
-
-    
 }
