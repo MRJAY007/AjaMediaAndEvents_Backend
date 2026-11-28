@@ -13,7 +13,6 @@ import com.aja.mediaevents.Services.EnquiryService;
 
 @RestController
 @RequestMapping("/api/enquiries")
-@CrossOrigin(origins = "http://localhost:3000")
 public class EnquiryController {
 
     private final EnquiryService enquiryService;
